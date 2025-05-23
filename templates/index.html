@@ -188,6 +188,7 @@
         const nodeModal = new bootstrap.Modal(document.getElementById('nodeModal'));
         let selectedNode = null;
         let activeNode = null;
+        let canvasDoubleClickCoords = null; // To store canvas click coordinates
 
         // Function to calculate position for new node
         function calculateNewNodePosition(sourceNode) {
@@ -259,6 +260,8 @@
 
         // Handle node creation from modal
         document.getElementById('createNodeBtn').addEventListener('click', async () => {
+            const parentNodeIdForFit = activeNode; // Capture activeNode before it's potentially changed by highlightNode
+
             const nodeData = {
                 id: document.getElementById('modalNodeId').value,
                 condition: document.getElementById('modalCondition').value,
@@ -285,16 +288,22 @@
 
                 if (response.ok) {
                     let position;
-                    if (activeNode) {
+                    if (canvasDoubleClickCoords && !activeNode) {
+                        // Use double-click coordinates if available and no active node
+                        position = { x: canvasDoubleClickCoords.x, y: canvasDoubleClickCoords.y };
+                        canvasDoubleClickCoords = null; // Reset after use
+                    } else if (activeNode) {
                         position = calculateNewNodePosition(activeNode);
                     } else {
-                        // If no active node, place at center of view
+                        // If no active node and no double-click, place at center of view
                         const viewPosition = network.getViewPosition();
                         const scale = network.getScale();
                         position = {
                             x: viewPosition.x,
                             y: viewPosition.y
                         };
+                        // Also ensure canvasDoubleClickCoords is null if we reach here without an activeNode
+                        canvasDoubleClickCoords = null;
                     }
 
                     console.log('Creating node at position:', position); // Debug log
@@ -356,8 +365,16 @@
                     document.getElementById('condition').value = nodeData.condition;
                     document.getElementById('behavior').value = nodeData.behavior;
 
-                    // Force network to redraw
-                    network.redraw();
+                    // Adjust view if a child node was added (i.e., a parent node was active)
+                    if (parentNodeIdForFit && edges.get().find(edge => edge.to === nodeData.id && edge.from === parentNodeIdForFit)) {
+                        network.fit({
+                            nodes: [parentNodeIdForFit, nodeData.id],
+                            animation: true
+                        });
+                    } else {
+                        // Force network to redraw for nodes created by double click or "Add Node" button without a parent
+                        network.redraw();
+                    }
                 } else {
                     alert(result.error || 'Failed to create node. Please try again.');
                 }
@@ -369,6 +386,11 @@
 
         // Handle node selection
         network.on('click', async function(params) {
+            // If a node is clicked, clear canvasDoubleClickCoords
+            if (params.nodes.length > 0) {
+                canvasDoubleClickCoords = null;
+            }
+
             if (params.nodes.length === 1) {
                 selectedNode = params.nodes[0];
                 const node = nodes.get(selectedNode);
@@ -401,11 +423,35 @@
             }
         });
 
+        // Handle canvas double-click for adding a new node
+        network.on('doubleClick', function(params) {
+            if (params.nodes.length === 0 && params.edges.length === 0) {
+                // Double-click was on an empty area
+                canvasDoubleClickCoords = { x: params.pointer.canvas.x, y: params.pointer.canvas.y };
+                activeNode = null; // No active node for an orphan node
+                selectedNode = null; // Also clear selected node
+
+                // Deselect any visually highlighted node in the graph
+                if (network.getSelectedNodes().length > 0) {
+                    network.unselectAll();
+                }
+                 // Clear the details form panel as well
+                document.getElementById('nodeForm').reset();
+
+
+                document.getElementById('modalNodeForm').reset();
+                nodeModal.show();
+                document.getElementById('modalNodeId').focus();
+            }
+        });
+
         // Add Node button click handler
         document.getElementById('addNodeBtn').addEventListener('click', () => {
+            canvasDoubleClickCoords = null; // Reset canvas click coords
             // Reset the modal form
             document.getElementById('modalNodeForm').reset();
             nodeModal.show();
+            document.getElementById('modalNodeId').focus(); // Set focus to the modal's Node ID input
         });
 
         // Handle modal form submission
@@ -457,6 +503,23 @@
         }
 
         loadGraphData();
+
+        // Handle Tab key press for adding a child node
+        document.addEventListener('keydown', (event) => {
+            if (event.key === 'Tab' && activeNode) {
+                event.preventDefault(); // Prevent default Tab behavior
+                canvasDoubleClickCoords = null; // Reset canvas click coords
+
+                // Reset the modal form
+                document.getElementById('modalNodeForm').reset();
+
+                // Open the 'Create New Node' modal
+                nodeModal.show();
+
+                // Set focus on the 'Node ID' input field within the modal
+                document.getElementById('modalNodeId').focus();
+            }
+        });
     </script>
 </body>
 </html> 
